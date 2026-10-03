@@ -5,362 +5,467 @@ type Message = {
   text: string;
 };
 
-function normalize(text: string) {
+function clean(text: string) {
   return text
     .toLowerCase()
-    .replace(/[^\w\s]/g, "")
+    .replace(/[^\w\s.-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function getFallbackQuestion(
+function alreadyAsked(
+  history: Message[],
+  question: string
+) {
+  const target = clean(question);
+
+  return history
+    .filter(
+      (m) => m.speaker === "interviewer"
+    )
+    .some((m) => {
+      const previous = clean(m.text);
+
+      // Exact match
+      if (previous === target) return true;
+
+      // Similarity based on important words
+      const a = new Set(
+        target
+          .split(" ")
+          .filter((word) => word.length > 4)
+      );
+
+      const b = new Set(
+        previous
+          .split(" ")
+          .filter((word) => word.length > 4)
+      );
+
+      if (a.size === 0) return false;
+
+      let matches = 0;
+
+      for (const word of a) {
+        if (b.has(word)) matches++;
+      }
+
+      return matches / a.size > 0.75;
+    });
+}
+
+function fallbackQuestion(
   role: string,
   history: Message[]
 ) {
-  const previousQuestions = history
-    .filter((item) => item.speaker === "interviewer")
-    .map((item) => normalize(item.text));
-
-  const answers = history
-    .filter((item) => item.speaker === "candidate")
-    .map((item) => item.text);
+  const answers = history.filter(
+    (m) => m.speaker === "candidate"
+  );
 
   const lastAnswer =
-    answers[answers.length - 1]?.toLowerCase() || "";
+    answers[answers.length - 1]?.text || "";
 
-  const questionNumber = answers.length + 1;
+  const text = clean(lastAnswer);
 
-  // --------------------------------
-  // QUESTION 1
-  // --------------------------------
+  const candidates: string[] = [];
 
-  if (answers.length === 0) {
-    return `Welcome to your ${role} interview. Please introduce yourself and briefly describe your experience relevant to this role.`;
-  }
-
-  // --------------------------------
-  // POSSIBLE ADAPTIVE QUESTIONS
-  // --------------------------------
-
-  const adaptiveQuestions: string[] = [];
+  // -------------------------------
+  // REACT / FRONTEND
+  // -------------------------------
 
   if (
-    lastAnswer.includes("react") ||
-    lastAnswer.includes("next.js") ||
-    lastAnswer.includes("nextjs")
+    /\breact\b|\bnext\.?js\b|\bfrontend\b|\bfront end\b/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "You mentioned React or Next.js. Describe a difficult problem you encountered while using it and explain how you solved it."
+    candidates.push(
+      "You mentioned frontend development. What happens when a React component re-renders, and how would you prevent unnecessary re-renders?"
     );
 
-    adaptiveQuestions.push(
-      "How would you improve the performance of a large React application that is re-rendering too frequently?"
+    candidates.push(
+      "You mentioned React. Describe a difficult frontend bug you faced and how you diagnosed it."
+    );
+
+    candidates.push(
+      "For the frontend project you mentioned, how did you decide how to structure your components and state?"
     );
   }
+
+  // -------------------------------
+  // JAVASCRIPT
+  // -------------------------------
 
   if (
-    lastAnswer.includes("javascript") ||
-    lastAnswer.includes("typescript")
+    /\bjavascript\b|\btypescript\b|\basync\b|\bpromise\b|\bclosure\b/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "You mentioned JavaScript or TypeScript. Explain a concept from it that you have applied in a real project."
+    candidates.push(
+      "You mentioned JavaScript. Can you explain how asynchronous code works and give an example from a project?"
     );
 
-    adaptiveQuestions.push(
-      "How would you debug an asynchronous JavaScript problem where an API response is not appearing correctly in the interface?"
+    candidates.push(
+      "You mentioned TypeScript or JavaScript. What is one language feature that has helped you write safer or more maintainable code?"
     );
   }
+
+  // -------------------------------
+  // API / BACKEND
+  // -------------------------------
 
   if (
-    lastAnswer.includes("api") ||
-    lastAnswer.includes("backend")
+    /\bapi\b|\bbackend\b|\bserver\b|\bnode\b|\bexpress\b/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "You mentioned APIs or backend development. How would you handle API failures, loading states, and retries in a production application?"
+    candidates.push(
+      "You mentioned backend development. How would you design an API that remains reliable when a downstream service fails?"
+    );
+
+    candidates.push(
+      "You mentioned an API. How would you handle authentication, validation, errors, and rate limiting?"
     );
   }
+
+  // -------------------------------
+  // DATABASE
+  // -------------------------------
 
   if (
-    lastAnswer.includes("database") ||
-    lastAnswer.includes("sql") ||
-    lastAnswer.includes("supabase")
+    /\bdatabase\b|\bsql\b|\bsupabase\b|\bpostgres\b|\bmongodb\b|\bmysql\b/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "You mentioned database development. How would you design secure database access while preventing unauthorized users from reading another user's information?"
+    candidates.push(
+      "You mentioned database work. How would you design the database tables for a scalable application?"
+    );
+
+    candidates.push(
+      "You mentioned a database. How would you protect user data from unauthorized access?"
     );
   }
+
+  // -------------------------------
+  // PROJECT
+  // -------------------------------
 
   if (
-    lastAnswer.includes("team") ||
-    lastAnswer.includes("group")
+    /\bproject\b|\bbuilt\b|\bdeveloped\b|\bapplication\b|\bapp\b/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "You mentioned teamwork. Describe a disagreement within a team and explain how you helped resolve it."
+    candidates.push(
+      "You mentioned a project you built. What was the hardest technical decision you made, and what alternatives did you consider?"
+    );
+
+    candidates.push(
+      "For the project you described, how did you test whether your solution actually worked?"
+    );
+
+    candidates.push(
+      "If you had one more week to improve that project, what would you change and why?"
     );
   }
+
+  // -------------------------------
+  // TEAMWORK
+  // -------------------------------
 
   if (
-    lastAnswer.includes("project") ||
-    lastAnswer.includes("built") ||
-    lastAnswer.includes("developed")
+    /\bteam\b|\bteammate\b|\bgroup\b|\bcollaborat\b|\bgithub\b/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "Thinking about the project you mentioned, what was the most difficult technical decision you made and why?"
+    candidates.push(
+      "You mentioned teamwork. Tell me about a disagreement with a teammate and how you resolved it."
+    );
+
+    candidates.push(
+      "How did you divide responsibilities within the team, and how did you make sure the pieces worked together?"
     );
   }
+
+  // -------------------------------
+  // PROBLEM SOLVING
+  // -------------------------------
 
   if (
-    lastAnswer.includes("performance") ||
-    lastAnswer.includes("optimization")
+    /\bproblem\b|\bbug\b|\berror\b|\bdebug\b|\bissue\b|\bfix\b/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "You mentioned performance optimization. How would you identify the actual bottleneck before deciding what to optimize?"
+    candidates.push(
+      "You mentioned debugging or problem solving. Walk me through your exact process for finding the root cause of a difficult bug."
+    );
+
+    candidates.push(
+      "How do you decide whether a problem is caused by the frontend, backend, database, or external service?"
     );
   }
+
+  // -------------------------------
+  // PERFORMANCE
+  // -------------------------------
 
   if (
-    lastAnswer.includes("css") ||
-    lastAnswer.includes("responsive") ||
-    lastAnswer.includes("frontend")
+    /\bperformance\b|\bslow\b|\boptimization\b|\boptimiz/.test(
+      text
+    )
   ) {
-    adaptiveQuestions.push(
-      "How do you build a responsive and accessible interface that works well across different devices?"
+    candidates.push(
+      "You mentioned performance. How would you measure the bottleneck before deciding what to optimize?"
+    );
+
+    candidates.push(
+      "What techniques would you use to improve the performance of a web application used by thousands of users?"
     );
   }
 
-  // Return an adaptive question ONLY if it has not
-  // already been asked.
-  for (const question of adaptiveQuestions) {
-    if (!previousQuestions.includes(normalize(question))) {
-      return question;
+  // -------------------------------
+  // AI / MACHINE LEARNING
+  // -------------------------------
+
+  if (
+    /\bai\b|\bartificial intelligence\b|\bmachine learning\b|\bml\b|\bmodel\b|\bgemini\b|\bllm\b/.test(
+      text
+    )
+  ) {
+    candidates.push(
+      "You mentioned AI or machine learning. How would you evaluate whether an AI feature is actually useful to users?"
+    );
+
+    candidates.push(
+      "You mentioned an AI model. What would you consider when choosing a model for a production application?"
+    );
+  }
+
+  // -------------------------------
+  // DATA SCIENCE
+  // -------------------------------
+
+  if (
+    /\bdata science\b|\bdatascience\b|\bpandas\b|\bnumpy\b|\bpython\b|\bdata analysis\b|\bstatistics\b/.test(
+      text
+    )
+  ) {
+    candidates.push(
+      "You mentioned data science. How would you handle missing or inconsistent data before building a model?"
+    );
+
+    candidates.push(
+      "How would you decide which metrics are useful for evaluating a machine-learning model?"
+    );
+  }
+
+  // -------------------------------
+  // ECE / ELECTRONICS
+  // -------------------------------
+
+  if (
+    /\bece\b|\belectronics\b|\bmicrocontroller\b|\bembedded\b|\biot\b|\bsensor\b|\barduino\b/.test(
+      text
+    )
+  ) {
+    candidates.push(
+      "You mentioned embedded or electronics work. Describe a hardware-software integration problem you would expect to encounter and how you would debug it."
+    );
+
+    candidates.push(
+      "How would you design an embedded system that needs to process sensor data reliably?"
+    );
+  }
+
+  // -------------------------------
+  // CHOOSE UNUSED CONTEXTUAL QUESTION
+  // -------------------------------
+
+  for (const candidate of candidates) {
+    if (!alreadyAsked(history, candidate)) {
+      return candidate;
     }
   }
 
-  // --------------------------------
-  // PROGRESSIVE QUESTION BANK
-  // --------------------------------
+  // -------------------------------
+  // GENERAL QUESTIONS
+  // -------------------------------
 
-  const questionBank = [
-    `What technical skills do you consider most important for a ${role}, and which of those skills is currently your strongest?`,
+  const generalQuestions = [
+    `What technical skill are you currently improving for your ${role} career, and how are you practicing it?`,
 
-    "Describe a challenging bug you encountered. How did you systematically identify its root cause?",
+    "Describe a difficult problem you solved and explain your reasoning step by step.",
 
-    "Suppose users report that your web application has become slow. Walk me through how you would investigate the problem.",
+    "How do you test your work before giving it to a user or client?",
 
-    "How do you structure your code so that another developer can understand and maintain it easily?",
+    "Tell me about a time when your first solution did not work. What did you change?",
 
-    "Tell me about a situation where something you built failed or did not work as expected. What did you learn from it?",
+    "How do you balance speed of development with code quality?",
 
-    "Imagine you have a feature deadline tomorrow but discover a significant technical problem today. How would you handle the situation?",
+    "How would you explain a complex technical concept to someone without a technical background?",
 
-    "How do you test a feature before considering it ready for production?",
+    "Tell me about a time you received critical feedback and how you responded.",
 
-    "Describe a situation where you had to learn a new technology quickly. What was your approach?",
+    "If you joined an unfamiliar codebase tomorrow, what would you do during your first day?",
 
-    "How would you explain a complex technical problem to a non-technical team member?",
+    "What technical area would you like to become significantly better at during the next year?",
 
-    "Tell me about a time you received critical feedback about your work. How did you respond?",
-
-    `What do you think separates an average ${role} from an excellent one?`,
-
-    "If you joined a large existing codebase tomorrow, what would you do during your first few days to understand it?",
-
-    "What is one technical area you currently want to improve, and what are you doing to improve it?",
-
-    `Why are you interested in a ${role} position, and what kind of problems would you like to work on?`,
+    `Why are you interested in working as a ${role}?`,
   ];
 
-  // Find first question that hasn't been asked.
-  const unusedQuestion = questionBank.find(
-    (question) =>
-      !previousQuestions.includes(normalize(question))
-  );
-
-  if (unusedQuestion) {
-    return unusedQuestion;
+  for (const candidate of generalQuestions) {
+    if (!alreadyAsked(history, candidate)) {
+      return candidate;
+    }
   }
 
-  // Extremely long interview fallback
-  return `This is question ${questionNumber}. Describe another challenging situation from your experience that we have not discussed yet, and explain how you approached it.`;
+  return "Tell me about another technical challenge you have faced and explain how you solved it.";
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
     const body = await request.json();
 
     const role =
-      typeof body.role === "string" && body.role.trim()
+      typeof body.role === "string" &&
+      body.role.trim()
         ? body.role.trim()
         : "Software Developer";
 
-    const history: Message[] = Array.isArray(body.history)
-      ? body.history
-      : [];
+    const history: Message[] =
+      Array.isArray(body.history)
+        ? body.history
+        : [];
 
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    // --------------------------------
-    // NO GEMINI KEY
-    // --------------------------------
-
-    if (!apiKey) {
-      return NextResponse.json({
-        question: getFallbackQuestion(role, history),
-        source: "fallback",
-      });
-    }
+    const apiKey =
+      process.env.GEMINI_API_KEY;
 
     // --------------------------------
-    // BUILD CONVERSATION
+    // TRY GEMINI FIRST
     // --------------------------------
 
-    const conversation = history
-      .map((item) => {
-        const person =
-          item.speaker === "candidate"
-            ? "Candidate"
-            : "Interviewer";
+    if (apiKey) {
+      const conversation =
+        history
+          .map((item) => {
+            const person =
+              item.speaker ===
+              "candidate"
+                ? "Candidate"
+                : "Interviewer";
 
-        return `${person}: ${item.text}`;
-      })
-      .join("\n");
+            return `${person}: ${item.text}`;
+          })
+          .join("\n");
 
-    const previousQuestions = history
-      .filter(
-        (item) => item.speaker === "interviewer"
-      )
-      .map((item) => item.text)
-      .join("\n");
+      const previousQuestions =
+        history
+          .filter(
+            (item) =>
+              item.speaker ===
+              "interviewer"
+          )
+          .map(
+            (item) => item.text
+          )
+          .join("\n");
 
-    const prompt = `
-You are a professional AI interviewer.
+      const prompt = `
+You are a professional human interviewer.
 
-You are interviewing a candidate for:
-
+Role:
 ${role}
 
-CONVERSATION SO FAR:
+Conversation:
+${conversation || "No previous conversation."}
 
-${conversation || "This is the beginning of the interview."}
-
-QUESTIONS ALREADY ASKED:
-
+Previous questions:
 ${previousQuestions || "None"}
 
-Generate exactly ONE next interview question.
+Ask exactly ONE next question.
 
-IMPORTANT RULES:
-
-1. Never repeat a question already asked.
-2. Use the candidate's latest answer when possible.
-3. Ask a meaningful follow-up when their answer introduces an interesting technical topic.
-4. Gradually increase difficulty.
-5. Mix:
-   - technical questions
-   - behavioral questions
-   - problem-solving questions
-   - situational questions
-   - project questions
-6. Do not give feedback yet.
-7. Do not provide the answer.
-8. Do not number the question.
-9. Return ONLY the interview question.
-10. Keep the question concise and natural.
-
-The interview should feel like a real interviewer reacting to the candidate rather than reading a fixed questionnaire.
+CRITICAL:
+- Base the next question on the candidate's MOST RECENT answer.
+- If they mention a technology, project, decision, problem, or experience, ask a meaningful follow-up about that specific thing.
+- Do not ask a generic unrelated question when the answer contains useful information.
+- Never repeat a previous question.
+- Gradually increase difficulty.
+- Mix technical, behavioral, situational, and problem-solving questions.
+- Return ONLY the question.
 `;
 
-    // --------------------------------
-    // TRY GEMINI
-    // --------------------------------
-
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type": "application/json",
-          },
-
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
+      try {
+        const response =
+          await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                contents: [
                   {
-                    text: prompt,
+                    parts: [
+                      {
+                        text: prompt,
+                      },
+                    ],
                   },
                 ],
-              },
-            ],
-          }),
-        }
-      );
+              }),
+            }
+          );
 
-      if (response.ok) {
-        const data = await response.json();
+        if (response.ok) {
+          const data =
+            await response.json();
 
-        const generatedQuestion =
-          data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          const generated =
+            data?.candidates?.[0]
+              ?.content?.parts?.[0]
+              ?.text?.trim();
 
-        if (generatedQuestion) {
-          const alreadyAsked = history
-            .filter(
-              (item) =>
-                item.speaker === "interviewer"
+          if (
+            generated &&
+            !alreadyAsked(
+              history,
+              generated
             )
-            .some(
-              (item) =>
-                normalize(item.text) ===
-                normalize(generatedQuestion)
+          ) {
+            return NextResponse.json(
+              {
+                question: generated,
+                source: "gemini",
+              }
             );
-
-          if (!alreadyAsked) {
-            return NextResponse.json({
-              question: generatedQuestion,
-              source: "gemini",
-            });
           }
         }
-      } else {
-        const errorData = await response
-          .json()
-          .catch(() => null);
-
-        console.log(
-          "Gemini unavailable. Using fallback.",
-          response.status,
-          errorData?.error?.status || ""
-        );
+      } catch {
+        // Use local fallback
       }
-    } catch {
-      console.log(
-        "Gemini connection unavailable. Using fallback."
-      );
     }
 
     // --------------------------------
-    // FALLBACK
+    // LOCAL ADAPTIVE FALLBACK
     // --------------------------------
 
     return NextResponse.json({
-      question: getFallbackQuestion(
-        role,
-        history
-      ),
-
+      question:
+        fallbackQuestion(
+          role,
+          history
+        ),
       source: "fallback",
     });
   } catch {
     return NextResponse.json(
       {
         error:
-          "Could not process interview request.",
+          "Could not generate interview question.",
       },
-      {
-        status: 400,
-      }
+      { status: 500 }
     );
   }
 }
